@@ -1,0 +1,232 @@
+provider "aws" {
+  region = "us-west-2"
+}
+
+resource "aws_db_instance" "my-test-sql" {
+  instance_class          = "${var.db_instance}"
+  engine                  = "mysql"
+  engine_version          = "5.7"
+  multi_az                = true
+  storage_type            = "gp2"
+  allocated_storage       = 20
+  name                    = "mytestrds"
+  username                = "admin"
+  password                = "admin123"
+  apply_immediately       = "true"
+  backup_retention_period = 10
+  backup_window           = "09:46-10:16"
+  db_subnet_group_name    = "${aws_db_subnet_group.my-rds-db-subnet.name}"
+  vpc_security_group_ids  = ["${aws_security_group.my-rds-sg.id}"]
+}
+
+resource "aws_db_subnet_group" "my-rds-db-subnet" {
+  name       = "my-rds-db-subnet"
+  subnet_ids = ["${var.rds_subnet1}", "${var.rds_subnet2}"]
+}
+
+resource "aws_security_group" "my-rds-sg" {
+  name   = "my-rds-sg"
+  vpc_id = "${var.vpc_id}"
+}
+
+resource "aws_security_group_rule" "my-rds-sg-rule" {
+  from_port         = 3306
+  protocol          = "tcp"
+  security_group_id = "${aws_security_group.my-rds-sg.id}"
+  to_port           = 3306
+  type              = "ingress"
+  cidr_blocks       = ["0.0.0.0/0"]
+}
+
+resource "aws_security_group_rule" "outbound_rule" {
+  from_port         = 0
+  protocol          = "-1"
+  security_group_id = "${aws_security_group.my-rds-sg.id}"
+  to_port           = 0
+  type              = "egress"
+  cidr_blocks       = ["0.0.0.0/0"]
+}
+
+/*
+data "aws_kms_secret" "rds" {
+  secret {
+    name = "db-password"
+    payload = "AQICAHibS2rwth4UleeAxsSEfxgwqkPtD0jzkRM/Ez91Y7cbvwEHP2YRcuplZp/H7GqmIuXVAAAAZjBkBgkqhkiG9w0BBwagVzBVAgEAMFAGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMps5PwT/x3nCnBMfTAgEQgCNd+Y6q9KBZbIX8JZlqP7EDErQLuaBLh6mKaYBz+5blxWstwQ=="
+  }
+}
+*/
+
+
+
+provider "aws" {
+    region = "us-east-1"
+}
+
+data "aws_availability_zones" "available" {}
+
+#Creating VPC 
+resource "aws_vpc" "main" {
+    cidr_block = "${var.vpc_cidr}"
+    enable_dns_hostnames = true 
+    enable_dns_support = true 
+    tags = {
+        "Name" = "My-test-vpc"
+    }
+}
+
+#Cretaing Internet Gateway 
+resource "aws_internet_gateway" "igw" {
+    vpc_id = "${aws_vpc.main.id}"
+    tags = {
+        "Name"= "my-test-igw"
+    }
+}
+
+#Creating a Route_table 
+#create pubilc_route  
+
+resource "aws_default_route_table" "public_route" {
+    vpc_id = "${aws_vpc.main.id}"
+
+    route = [ {
+        cidr_block = "0.0.0.0"
+        gateway_id = "${aws_internet_gateway.id}"
+    } ]
+    tags = {
+        Name = "my-test-public-route"
+    }
+}
+
+#Craete a privte_route 
+
+resource "aws_default_route_table" "private_route" {
+    default_route_table_id = "${aws_vpc.main.default_route_table_id}"
+    tags = {
+        "Name" = "my-Privte-route-table"
+    }
+}
+
+#Creating Public Subnets 
+
+resource "aws_subnet" "public_subnet" {
+    count                   = 2
+    cidr_block              = "${var.public_cidrs[count.index]}"
+    vpc_id                  = "${aws_vpc.main.id}"
+    map_public_ip_on_launch = true 
+    availability_zone       = "${data.aws.availability_zones.avaliable.names[count.index]}"
+
+    tags = {
+        "Name" = "my-public-subnet.${count.index + 1}"
+    }
+}
+
+
+#Private_subnet 
+
+resource "aws_subnet" "private_subnet" {
+    count                   = 2
+    cidr_block              = "${var.private_cidrs[count.index]}"
+    vpc_id                  = "${aws_vpc.main.id}"
+    map_public_ip_on_launch = true 
+    availability_zone      = "${data.aws.availability_zones.avaliable.names[count.index]}"
+
+    tags = {
+        "Name" = "my-public-subnet.${count.index + 1}"
+    }
+}
+
+# Associate public Subnet with Public Route table 
+
+resource "aws_route_table_association" "public_subnet_associate" {
+    count                   = 2 
+    route_table_id          = "${aws_route_table.public_route.id}"
+    subnet_id               = "${aws_subnet.public_subnet.*.id[count.index]}"
+    depends_on = [ "aws_route_table.public_route", "aws_subnet.public_subnet"]
+}
+
+
+# Associate Private Subnet with Private Route table 
+resource "aws_route_table_association" "private_subnet_associate" {
+    count                   = 2 
+    route_table_id          = "${aws_route_table.private_route.id}"
+    subnet_id               = "${aws_subnet.public_subnet.*.id[count.index]}"
+    depends_on              = [ "aws_route_table.private_route", "aws_subnet.private_subnet"]
+}
+
+# Security groups creation
+resource "aws_security_group" "my-rds-sg" {
+  name   = "my-rds-sg"
+  vpc_id = "${aws_vpc.main.id}"
+}
+
+resource "aws_security_group_rule" "db-sg" {
+   # vpc_id      = "${aws_vpc.main.id}"
+    from_port       = 1521
+    to_port         = 1521
+    protocol        = "tcp"
+    security_group_id = "${aws_security_group.my-rds-sg}"
+    type            = "ingress"
+    cidr_blocks     = ["0.0.0.0/0"]
+}    
+
+resource "aws_security_group_rule" "outbound_rule" {
+    from_port       = 0
+    to_port         = 0
+    protocol        = "-1"
+    security_group_id = "${aws_security_group.my-rds-sg}"
+    type            = "egress"
+    cidr_blocks     = ["0.0.0.0/0"]
+}
+
+#create Rds db parameteres
+resource "aws_db_parameter_group" "my-rds-oracle" {
+    name    = "oracle"
+    family  = "oracle19.0"
+}
+
+#Creating RDS Database 
+
+resource "aws_db_instance" "rds" {
+    allocated_storage               = 20 
+    identifier                      = "oracledb"
+    storage_type                    = "gp2"
+    engine                          = "oracle-ee"
+    engine_version                  = "19.0.0.0"
+    instance_class                  = "db.m5.large"
+    name                            = "awsiroracle01np"
+    username                        = "root"
+    password                        = "root"
+    parameter_group_name            = "oracle"
+    db_subnet_group_name            = "aws_db_subnet_group.private_subnet.name"
+    vpc_security_group_ids          =  ["${aws_security_group.my-rds-sg.id}"]
+   # availability_zone               = "aws_subnet.private_subnet.data.aws_availability_zones"
+}
+
+#output 
+output "db_end_point" {
+    value = aws_db_instance.my-rds-oracle.endpoint
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
