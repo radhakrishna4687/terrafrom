@@ -34,5 +34,6 @@ resource "aws_db_instance" "oracledb" {
   availability_zone = "${aws_subnet.main-private-1.avaliability_zone}"
   tags {
       Name = "oracle-instance"
+    
   }
 }
